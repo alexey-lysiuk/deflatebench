@@ -26,7 +26,6 @@ import re
 import math
 import tempfile
 import time
-import toml
 import shlex
 import shutil
 import hashlib
@@ -87,8 +86,8 @@ def defconfig():
                             'testmode': 'single',  # generate / multi / single
                             'testtool': 'minigzip' } # minigzip / minideflate
 
-    config['Config'] = {'temp_path': tempfile.gettempdir(),
-                        'use_perf': True,
+    config['Config'] = {'temp_path': '/Volumes/ramdisk/zlib-ng-test',
+                        'use_perf': False,
                         'start_delay': 0,   # Milliseconds of startup to skip measuring, requires usleep(X*1000) in minigzip/minideflate main()
                         'skipverify': False,
                         'skipdecomp': False}
@@ -130,17 +129,6 @@ def defconfig():
                                 '8': 45,
                                 '9': 45 }
     return config
-
-def parseconfig(file):
-    ''' Parse config file '''
-    config = toml.load(file)
-    return config
-
-def writeconfig(file):
-    ''' Write default config to file '''
-    config = defconfig()
-    with open(file, 'w') as f:
-        toml.dump(config,f)
 
 def mergeconfig(src, chg):
     ''' Merge config settings from chg into src '''
@@ -256,7 +244,7 @@ def command_prefix(filen):
         command += f" /usr/bin/perf stat -D {cfgConfig['start_delay']} -e cpu-clock:u -o '{filen}' -- "
     else:
         timeformat="%U"
-        command += f" -20 /usr/bin/time -o {timefile} -f '{timeformat}' -- "
+        command += f" /usr/bin/time -o {timefile} -f '{timeformat}' -- "
 
     return command
 
@@ -285,7 +273,6 @@ def runtest(tempfiles,level):
 
     sys.stdout.write(f"Testing level {level}: ")
     if sys.platform != 'win32':
-        cmdprefix = command_prefix(timefile)
         runcommand('sync')
 
     # Compress
@@ -295,10 +282,7 @@ def runtest(tempfiles,level):
     testtool = os.path.realpath(cfgRuns['testtool'])
 
     runcommand(f"{cmdprefix} {testtool} -{level} -c {testfile}", env=env, output=compfile)
-    if sys.platform != 'win32':
-        comptime = parse_timefile(timefile)
-    else:
-        comptime = time.perf_counter() - starttime
+    comptime = time.perf_counter() - starttime
     compsize = os.path.getsize(compfile)
 
     # Decompress
@@ -308,10 +292,7 @@ def runtest(tempfiles,level):
         starttime = time.perf_counter()
         runcommand(f"{cmdprefix} {testtool} -d -c {compfile}", env=env, output=decompfile)
 
-        if sys.platform != 'win32':
-            decomptime = parse_timefile(timefile)
-        else:
-            decomptime = time.perf_counter() - starttime
+        decomptime = time.perf_counter() - starttime
 
         if not cfgConfig['skipverify']:
             ourhash = hashfile(decompfile)
@@ -594,30 +575,8 @@ def main():
 
     defconfig_path = findfile('deflatebench.conf',fatal=False)
 
-    # Write default config file
-    if args.write_config:
-        if not defconfig_path:
-            defconfig_path = os.path.join( os.path.expanduser("~"), 'deflatebench.conf')
-            writeconfig(defconfig_path)
-        else:
-            print(f"ERROR: {defconfig_path} already exists, not overwriting.")
-        sys.exit(1)
-
-
     # Load defconfig, then potentially override with values from config file
     cfg = defconfig()
-    if args.profile and not args.profile == 'default':
-        profilename = f"deflatebench-{args.profile}.conf"
-        profilefile = findfile(profilename, fatal=True)
-        cfgtmp = parseconfig(profilefile)
-        cfg = mergeconfig(cfg,cfgtmp)
-        print(f"Loaded config file '{profilefile}'.")
-    elif defconfig_path:
-        cfgtmp = parseconfig(defconfig_path)
-        cfg = mergeconfig(cfg,cfgtmp)
-        print(f"Loaded config file '{defconfig_path}'.")
-    else:
-        print("Loaded default config.")
 
     # Split config into separate dicts
     cfgRuns = cfg['Testruns']
